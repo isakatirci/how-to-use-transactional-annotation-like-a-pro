@@ -1,8 +1,18 @@
 package com.isakatirci.demo.transactional;
 
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.EnableRetry;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.lang.annotation.Repeatable;
+import java.sql.SQLException;
 
 @Component
+@EnableRetry
 public class SpeakerService {
     private final SpeakersRepository speakersRepository;
     private final HistoryRepository historyRepository;
@@ -14,20 +24,22 @@ public class SpeakerService {
         this.streamBridge = streamBridge;
     }
 
-    public void addLikesToSpeaker(Likes likes) {
-        if (likes.getTalkName() != null) {
-            speakersRepository.findByTalkName(likes.getTalkName()).ifPresentOrElse(speaker -> {
-                saveMessageToHistory(likes, "RECEIVED");
-                speaker.setLikes(speaker.getLikes() + likes.getLikes());
+    @Transactional(isolation = Isolation.REPEATABLE_READ)
+    @Retryable(value = org.springframework.dao.CannotAcquireLockException.class, maxAttempts = 15, backoff = @Backoff(delay = 1000))
+    public void addLikesToSpeaker(Likes like) {
+        if (like.getTalkName() != null) {
+            speakersRepository.findByTalkName(like.getTalkName()).ifPresentOrElse(speaker -> {
+                saveMessageToHistory(like, "RECEIVED");
+                speaker.setLikes(speaker.getLikes() + like.getLikes());
                 speakersRepository.save(speaker);
-                System.out.printf("%1s likes added to %1s%n", likes.getLikes(), speaker.getFirstName() + " " + speaker.getLastName());
+                System.out.printf("%s like added to %s%n", like.getLikes(), speaker.getFirstName() + " " + speaker.getLastName());
             }, () -> {
-                System.out.printf("Speaker with talk %1s not found", likes.getTalkName());
-                saveMessageToHistory(likes, "ORPHANED");
+                System.out.printf("Speaker with talk %s not found", like.getTalkName());
+                saveMessageToHistory(like, "ORPHANED");
             });
         } else {
-            System.out.println("Error during adding likes, no IDs given");
-            saveMessageToHistory(likes, "CORRUPTED");
+            System.out.println("Error during adding like, no IDs given");
+            saveMessageToHistory(like, "CORRUPTED");
         }
     }
 
@@ -35,13 +47,13 @@ public class SpeakerService {
         streamBridge.send("likesProducer-out-0", likes);
     }
 
-    private void saveMessageToHistory(Likes likes, String status) {
+    private void saveMessageToHistory(Likes like, String status) {
         try {
-           /* historyRepository.save(History.builder()
-                    .talkName(likes.getTalkName())
-                    .likes(likes.getLikes())
+            historyRepository.save(History.builder()
+                    .talkName(like.getTalkName())
+                    .likes(like.getLikes())
                     .status(status)
-                    .build());*/
+                    .build());
         } catch (RuntimeException ex) {
             System.out.printf("Failed to save message to history. %1s", ex);
         }
