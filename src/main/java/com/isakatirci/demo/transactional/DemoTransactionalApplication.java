@@ -8,6 +8,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -18,6 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 @AllArgsConstructor
 @SpringBootApplication
+@EnableAsync
+//@EnableScheduling
 public class DemoTransactionalApplication {
 
     private final SpeakersRepository speakersRepository;
@@ -38,7 +44,8 @@ public class DemoTransactionalApplication {
         System.out.println("incrementCounter" + Thread.currentThread().getName() + ": " + counter.getAndIncrement());
     }
 
-    private void extracted() throws InterruptedException {
+    //https://www.baeldung.com/spring-scheduled-tasks
+    public void extracted() throws InterruptedException {
         List<Thread> threads = new ArrayList<>();
         for (int i = 0; i < 1000; i++) {
             final Likes likes = new Likes();
