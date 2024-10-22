@@ -1,27 +1,21 @@
 package com.isakatirci.demo.transactional;
 
-import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.EnableRetry;
+import org.springframework.retry.annotation.Recover;
 import org.springframework.retry.annotation.Retryable;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.lang.annotation.Repeatable;
 import java.sql.SQLException;
 
 @Service
 @EnableRetry
 //@EnableScheduling
-//@EnableAsync
+@EnableAsync
 @RequiredArgsConstructor
 public class SpeakerService {
     private final SpeakersRepository speakersRepository;
@@ -30,8 +24,8 @@ public class SpeakerService {
     private final HistoryService historyService;
 
 
-    @Transactional(isolation = Isolation.REPEATABLE_READ, timeout = 1)
-    //@Retryable(value = org.springframework.dao.CannotAcquireLockException.class, maxAttempts = 15, backoff = @Backoff(delay = 1000))
+    @Transactional(isolation = Isolation.REPEATABLE_READ, timeout = 60)
+    @Retryable(value = org.springframework.dao.CannotAcquireLockException.class, maxAttempts = 5, backoff = @Backoff(delay = 1000), recover = "addLikesToSpeakerRecover")
     //@Scheduled(fixedDelay = 1000)
     //@Async
     public void addLikesToSpeaker(Likes like) {
@@ -51,6 +45,24 @@ public class SpeakerService {
         }
     }
 
+    @Recover
+    public void addLikesToSpeakerRecover(Exception ex, Likes likes) throws SQLException {
+        if (likes.getTalkName() != null) {
+            speakersRepository.findByTalkName(likes.getTalkName()).ifPresentOrElse(speaker -> {
+                System.out.printf("Adding {} likes to {}", likes.getLikes(), speaker.getFirstName() + " " + speaker.getLastName());
+                speaker.setLikes(speaker.getLikes() + likes.getLikes());
+            }, () -> {
+                System.out.printf("Speaker with talk {} not found", likes.getTalkName());
+                saveMessageToHistory(likes, "ORPHANED");
+            });
+        } else {
+            System.out.printf("Error during adding likes, no IDs given");
+            saveMessageToHistory(likes, "CORRUPTED");
+            throw new SQLException();
+        }
+    }
+
+
     public void createTaskToAddLikes(Likes likes) {
         streamBridge.send("likesProducer-out-0", likes);
     }
@@ -65,5 +77,12 @@ public class SpeakerService {
         } catch (RuntimeException ex) {
             System.err.printf("Failed to save message to history. %1s", ex);
         }
+    }
+
+    public static void main(String[] args) {
+
+    }
+    public static int main(String[] args, int a) {
+        return 0;
     }
 }
